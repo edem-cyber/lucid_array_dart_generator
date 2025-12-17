@@ -1,7 +1,8 @@
 name: lucid_array_dart_generator
 description: Generate namespaced DTOs and ApiService clients from Swagger/OpenAPI specs for Flutter apps.
 version: 0.0.1
-homepage:
+homepage: https://github.com/edem-cyber/lucid_array_dart_generator
+repository: https://github.com/edem-cyber/lucid_array_dart_generator
 
 environment:
   sdk: ^3.7.0
