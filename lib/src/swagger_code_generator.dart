@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
-import 'package:path/path.dart' as p;
 import 'package:swagger_parser/src/parser/config/parser_config.dart';
 import 'package:swagger_parser/src/parser/parser/open_api_parser.dart';
 
