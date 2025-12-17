@@ -63,6 +63,39 @@ class TypeResolver {
 
   bool isAlias(String typeName) => _aliasSources.containsKey(typeName);
 
+  /// Returns `true` when [typeName] is a generated enum.
+  bool isEnumTypeName(String typeName) => _enumNames.contains(typeName);
+
+  /// Returns a string expression that converts [reference] into a query value.
+  String queryParameterEncodeExpression(
+    UniversalType type,
+    String reference, {
+    bool forceNonNullable = false,
+  }) {
+    final targetRef =
+        forceNonNullable && isNullable(type) ? '$reference!' : reference;
+    final base = _resolveBase(
+      type.type,
+      format: type.format,
+      expandingAlias: null,
+    );
+    if (isEnumTypeName(base)) {
+      return '$targetRef.value';
+    }
+    switch (base) {
+      case 'DateTime':
+        return '$targetRef.toIso8601String()';
+      case 'String':
+        return targetRef;
+      case 'bool':
+      case 'int':
+      case 'double':
+        return '$targetRef.toString()';
+      default:
+        return '$targetRef.toString()';
+    }
+  }
+
   String _dartTypeInternal(UniversalType type, {String? expandingAlias}) {
     final hasCollection = type.wrappingCollections.isNotEmpty;
     final base = _resolveBase(
