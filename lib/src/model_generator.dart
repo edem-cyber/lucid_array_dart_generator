@@ -1,5 +1,3 @@
-import 'dart:collection';
-
 import 'package:path/path.dart' as p;
 import 'package:swagger_parser/src/parser/model/universal_data_class.dart';
 import 'package:swagger_parser/src/parser/model/universal_type.dart';
