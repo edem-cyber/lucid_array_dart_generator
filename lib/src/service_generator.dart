@@ -171,7 +171,7 @@ class ServiceGenerator {
   ) {
     if (request.isMultiPart || request.isFormUrlEncoded) {
       warnings.add(
-        'Skipped ${serviceName}.${request.name} because multipart/form data is not supported yet.',
+        'Skipped $serviceName.${request.name} because multipart/form data is not supported yet.',
       );
       return null;
     }
@@ -179,7 +179,7 @@ class ServiceGenerator {
     final httpMethod = _httpMethodName(request.requestType);
     if (httpMethod == null) {
       warnings.add(
-        'Skipped ${serviceName}.${request.name} because ${request.requestType.name.toUpperCase()} is not supported yet.',
+        'Skipped $serviceName.${request.name} because ${request.requestType.name.toUpperCase()} is not supported yet.',
       );
       return null;
     }
@@ -284,7 +284,7 @@ class ServiceGenerator {
     );
 
     final positionalSection =
-        positionalParams.isEmpty ? '' : '$positionalParams';
+        positionalParams.isEmpty ? '' : positionalParams;
     final namedSection =
         namedParams.isEmpty
             ? ''
@@ -292,7 +292,7 @@ class ServiceGenerator {
     final comma =
         positionalSection.isNotEmpty && namedSection.isNotEmpty ? ', ' : '';
 
-    buffer..writeln(
+    buffer.writeln(
       '  Future<ApiResponse<${responseSpec.displayType}>> $methodName('
       '$positionalSection$comma$namedSection) async {',
     );
@@ -527,8 +527,7 @@ class _ParameterSpec {
     required this.name,
     required this.type,
     required this.kind,
-    this.isRequired = false,
-  });
+  }) : isRequired = false;
 
   _ParameterSpec.body(_BodyParameterSpec spec)
     : name = spec.name,
