@@ -215,12 +215,12 @@ class ModelGenerator {
       ..writeln();
 
     buffer.writeln('  Map<String, dynamic> toJson() {');
-    buffer.writeln('    final data = <String, dynamic>{};');
+    buffer.writeln('    final json = <String, dynamic>{};');
     for (final field in fieldSpecs) {
-      buffer.write(field.encodeExpression('data'));
+      buffer.write(field.encodeExpression('json'));
     }
     buffer
-      ..writeln('    return data;')
+      ..writeln('    return json;')
       ..writeln('  }');
     buffer.writeln('}');
 

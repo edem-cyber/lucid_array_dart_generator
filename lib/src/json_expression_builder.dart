@@ -34,14 +34,16 @@ class JsonExpressionBuilder {
             : '($accessExpression as num).toDouble()';
       default:
         if (resolver.isEnum(baseType)) {
-          final guarded =
-              "$accessExpression == null ? null : $baseType.fromJson($accessExpression as String)";
-          return nullable ? guarded : '$guarded!';
+          final expression =
+              '$baseType.fromJson($accessExpression as String?)';
+          return nullable ? expression : '$expression!';
         }
         if (resolver.isCustomModel(baseType)) {
-          final inner =
+          final expression =
               '$baseType.fromJson(Map<String, dynamic>.from($accessExpression as Map))';
-          return nullable ? "$accessExpression == null ? null : $inner" : inner;
+          return nullable
+              ? "$accessExpression == null ? null : $expression"
+              : expression;
         }
         if (baseType.startsWith('Map<')) {
           final mapExpr =
