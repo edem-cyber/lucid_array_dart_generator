@@ -35,6 +35,11 @@ String toCamelCase(String value) {
 
 String toPascalCase(String value) => _wordsFrom(value).map(_capitalize).join();
 
+String sanitizeIdentifier(String value) {
+  const reserved = {'class', 'enum', 'switch', 'default', 'operator', 'final'};
+  return reserved.contains(value) ? '${value}Value' : value;
+}
+
 Iterable<String> _wordsFrom(String value) sync* {
   final normalized = toSnakeCase(value);
   for (final part in normalized.split('_')) {
