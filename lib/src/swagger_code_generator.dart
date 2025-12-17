@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+import 'package:path/path.dart' as p;
 import 'package:swagger_parser/src/parser/config/parser_config.dart';
 import 'package:swagger_parser/src/parser/parser/open_api_parser.dart';
 
@@ -8,6 +10,7 @@ import 'generated_file.dart';
 import 'model_generator.dart';
 import 'schema_loader.dart';
 import 'service_generator.dart';
+import 'utils/string_utils.dart';
 
 /// Summary of a generator run.
 class GenerationSummary {
@@ -52,16 +55,31 @@ class SwaggerCodeGenerator {
     final restClients = parser.parseRestClients();
     final dataClasses = parser.parseDataClasses();
 
+    final namespace = _namespaceFolder(_effectiveSchemaName());
+    final modelsDirectory = p.join(
+      options.resolvedModelsDirectory,
+      '${namespace}Models',
+    );
+    final servicesDirectory = p.join(
+      options.resolvedServicesDirectory,
+      '${namespace}Service',
+    );
+
     _log('Generating models...');
     final modelGenerator = ModelGenerator(
-      outputDirectory: options.resolvedModelsDirectory,
+      outputDirectory: modelsDirectory,
     );
     final modelResult = modelGenerator.generate(dataClasses);
 
     _log('Generating services...');
+    final helpersPath = p.join(
+      servicesDirectory,
+      'service_helpers.dart',
+    );
     final serviceGenerator = ServiceGenerator(
-      outputDirectory: options.resolvedServicesDirectory,
+      outputDirectory: servicesDirectory,
       apiServicePath: options.resolvedApiServicePath,
+      helpersImportPath: helpersPath,
       symbolToFile: modelResult.symbolToFile,
       resolver: modelResult.resolver,
     );
@@ -88,8 +106,8 @@ class SwaggerCodeGenerator {
       serviceFilesWritten: writtenServiceFiles,
       warnings: warnings,
       outputDirectories: {
-        'models': options.resolvedModelsDirectory,
-        'services': options.resolvedServicesDirectory,
+        'models': modelsDirectory,
+        'services': servicesDirectory,
       },
     );
   }
@@ -124,5 +142,40 @@ class SwaggerCodeGenerator {
     if (!isVerbose || options.verbose) {
       stdout.writeln('[swagger_gen] $message');
     }
+  }
+
+  String _namespaceFolder(String schemaName) {
+    final raw = schemaName.trim();
+    final base =
+        raw.isEmpty ? 'api' : sanitizeIdentifier(toCamelCase(raw));
+    return base.isEmpty ? 'api' : base;
+  }
+
+  String _effectiveSchemaName() {
+    final configured = options.schemaName?.trim();
+    if (configured != null && configured.isNotEmpty) {
+      return configured;
+    }
+
+    final uri = Uri.tryParse(options.schemaPathOrUrl);
+    if (uri != null && uri.pathSegments.isNotEmpty) {
+      for (final segment in uri.pathSegments.reversed) {
+        final cleaned = segment.replaceAll('.json', '').trim();
+        final lower = cleaned.toLowerCase();
+        if (cleaned.isNotEmpty && lower != 'swagger' && lower != 'docs') {
+          return cleaned;
+        }
+      }
+    }
+
+    final fileName = options.schemaPathOrUrl.split('/').last;
+    if (fileName.isNotEmpty) {
+      final base = fileName.replaceAll('.json', '');
+      if (base.isNotEmpty) {
+        return base;
+      }
+    }
+
+    return 'api';
   }
 }
