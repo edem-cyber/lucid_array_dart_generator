@@ -1,27 +1,26 @@
 # Lucid Array Dart Generator
 
-Every time the backend swagger changes, we end up hand‑editing the same models
-and service classes. This package solves that. Point it at a Swagger/OpenAPI
-doc, hit run, and you instantly get the Dart DTOs plus strongly typed service
-clients wired to your `ApiService`. No more copy/paste or “oops the schema
-changed” bugs.
+Backend Swagger changes, we spend half a day retyping models, and somebody still
+misses a field. This package aims to solve that. This tool takes in the Swagger/OpenAPI file
+and generates Dart models plus ready‑to‑use service clients that call the
+`ApiService` interface. One command, everything stays in sync, no copy/pasting.
 
 ## What you get
 
-- **DTOs + enums** – Null‑safe models for every schema, already wired up with
+- **DTOs + enums** – Null-safe models for every schema, wired up with
   `fromJson`/`toJson`.
 - **Service clients** – Namespaced clients (`OrgService`, `UserService`, etc.)
-  that call your `ApiService` using typed path/body/query parameters.
-- **Shared helpers** – A tiny `service_helpers.dart` plus `services.dart` /
-  `models.dart` entry points so you import one file per layer.
-- **Namespaced output** – Each Swagger spec lands in `fooModels` +
-  `fooService`, so multiple APIs can coexist without collisions.
+  that call your `ApiService` using typed path/body/query params.
+- **Shared helpers** – Tiny `service_helpers.dart` plus `services.dart` /
+  `models.dart` barrels so you import one file per layer.
+- **Namespaced output** – Each spec lands in `fooModels` + `fooService`, so
+  multiple APIs live side-by-side.
 - **Chill CLI** – `swagger_gen` works via `dart run` or `dart pub global run`
-  with thoughtful defaults and verbose logging when you need it.
+  with defaults that just make sense.
 
-## Install
+## Install it
 
-### As a dev dependency (recommended for Flutter apps)
+### Drop it into dev_dependencies (Flutter apps)
 
 ```yaml
 dev_dependencies:
@@ -30,7 +29,7 @@ dev_dependencies:
 
 Then run `dart pub get`.
 
-### As a globally activated tool
+### Or install it globally
 
 ```sh
 dart pub global activate lucid_array_dart_generator
@@ -39,7 +38,7 @@ dart pub global activate lucid_array_dart_generator
 Once activated you can run the CLI with
 `dart pub global run lucid_array_dart_generator:swagger_gen …`.
 
-## Quick start
+## Quick start (copy/paste time)
 
 ```sh
 dart run lucid_array_dart_generator:swagger_gen \
@@ -82,67 +81,36 @@ lib/services/generated/
 > `schema_name` in `GeneratorOptions` or set `-m`/`-s` if you want tighter
 > control.
 
-## Generated layout
+## What lands on disk
 
-- **DTOs** live under `<output>/models/<Namespace>Models/`. Every schema becomes
-  a class with:
-  - required/optional constructor parameters and guarded `toJson` helpers.
-  - enum helpers (`fromJson`, `.value`) and typed wrappers for order/filter DTOs.
-  - `models.dart` barrel export so app code can `import '.../models.dart';`.
-
-- **Service clients** live under `<output>/services/<Namespace>Service/` and:
-  - mirror each tag/rest client from the spec (`OrganizationsService`,
-    `PermissionsService`, etc.).
-  - expose positional path parameters, typed named query arguments, and body
-    parameters that call `yourDto.toJson()`.
-  - include `service_helpers.dart` (`decodeJsonObject`, `decodeJsonList`) and a
-    `services.dart` barrel.
+- **DTOs** live in `<output>/models/<namespace>Models/` with a `models.dart`
+  barrel so you can `import '.../models.dart';` and be done.
+- **Services** live in `<output>/services/<namespace>Service/`, one class per
+  tag, with typed params and a shared helper for decoding responses.
 
 - **ApiService contract**: The generator expects an `ApiService` with:
   `get`, `post`, `put`, `patch`, `delete` methods returning
   `Future<ApiResponse<T>>`. You can swap in your own implementation as long as
   the signature matches.
 
-## Typical workflow
+## Daily flow
 
-1. Point the CLI at your schema (local file or URL):
-
-   ```sh
-   dart run lucid_array_dart_generator:swagger_gen openapi/org.json \
-     -o lib/services/generated \
-     -m orgModels \
-     -s orgService
-   ```
-
-2. Import the generated barrels where you need them:
-
-   ```dart
-   import 'package:my_app/services/generated/models/orgModels/models.dart';
-   import 'package:my_app/services/generated/services/orgService/services.dart';
-
-   final client = OrganizationsService();
-   final response = await client.getOrganizations(
-     queryOrganizationDto: QueryOrganizationDto(limit: 20),
-   );
-   ```
-
-3. Rerun the command whenever the Swagger document changes. Regeneration is
-   idempotent, so you can wire it into CI/CD or a `melos`/`make` script.
+1. Run the CLI with your spec (local file or URL).
+2. Import the generated `models.dart` / `services.dart` barrels in your app.
+3. Re-run whenever the Swagger doc changes. It’s idempotent, so drop it into CI,
+   a melos task, or whatever build script you like.
 
 ## Heads-up / FAQ
 
-- **“Undefined class …”** – ensure you import the generated barrel
-  (`…/models/<namespace>Models/models.dart`). The generator no longer emits
-  per‑file imports from your application code.
-- **Custom namespace/folder** – either set `--models` / `--services` or provide
-  a `schema_name` in `GeneratorOptions`.
-- **Multiple specs** – run the CLI per spec. Each run writes into a unique
-  `<Namespace>Models` / `<Namespace>Service` folder so they can coexist.
+- **Undefined class?** Import the barrel (`…/models/orgModels/models.dart`)
+  instead of individual files.
+- **Custom folders?** Pass `--models`, `--services`, or set `schema_name`.
+- **Multiple specs?** Run the CLI per spec; each gets its own namespace.
 
 ## Contributing
 
-New ideas welcome—open an issue with a sample schema if you spot a gap (multipart,
-custom serializers, build.yaml hooks, etc). For local dev:
+Ideas welcome—open an issue with a sample schema if you want something like
+multipart support, custom serializers, or build.yaml hooks. For local dev:
 
 ```
 dart format lib test bin
