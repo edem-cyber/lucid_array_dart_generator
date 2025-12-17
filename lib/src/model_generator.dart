@@ -91,6 +91,8 @@ class ModelGenerator {
       files.add(_buildModelFile(component, resolver, symbolToFile));
     }
 
+    files.add(_buildModelsBarrel(symbolToFile));
+
     return ModelGenerationResult(
       files: files,
       symbolToFile: symbolToFile,
@@ -227,6 +229,25 @@ class ModelGenerator {
     return GeneratedFile(path: filePath, content: buffer.toString());
   }
 
+  GeneratedFile _buildModelsBarrel(Map<String, String> symbolToFile) {
+    final buffer = StringBuffer()..writeln(_generatedHeader);
+    final exportPaths = symbolToFile.values
+        .map(
+          (path) => p
+              .relative(path, from: outputDirectory)
+              .replaceAll('\\', '/'),
+        )
+        .toList()
+      ..sort();
+    for (final exportPath in exportPaths) {
+      buffer.writeln("export '$exportPath';");
+    }
+    return GeneratedFile(
+      path: p.join(outputDirectory, 'models.dart'),
+      content: buffer.toString(),
+    );
+  }
+
   Iterable<String> _resolveImports(
     Set<String> imports,
     String fromPath,
@@ -268,7 +289,7 @@ class _FieldSpec {
     final fieldName = type.name ?? toCamelCase(type.jsonKey ?? 'value');
     return _FieldSpec(
       original: type,
-      name: _sanitizeName(fieldName),
+      name: sanitizeIdentifier(fieldName),
       jsonKey: type.jsonKey ?? fieldName,
       dartType: resolver.dartType(type),
       isRequired: !resolver.isNullable(type),
@@ -286,18 +307,6 @@ class _FieldSpec {
   final String? description;
   final TypeResolver resolver;
   final JsonExpressionBuilder jsonBuilder;
-
-  static String _sanitizeName(String value) {
-    const reserved = {
-      'class',
-      'enum',
-      'switch',
-      'default',
-      'operator',
-      'final',
-    };
-    return reserved.contains(value) ? '${value}Value' : value;
-  }
 
   String decodeExpression(String jsonVar) => jsonBuilder.decode(
     original,
