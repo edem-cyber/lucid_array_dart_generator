@@ -1,4 +1,5 @@
 import 'package:path/path.dart' as p;
+import 'package:swagger_parser/src/parser/model/universal_collections.dart';
 import 'package:swagger_parser/src/parser/model/universal_request.dart';
 import 'package:swagger_parser/src/parser/model/universal_request_type.dart';
 import 'package:swagger_parser/src/parser/model/universal_rest_client.dart';
@@ -14,6 +15,41 @@ const _generatedHeader = '''
 // ignore_for_file: public_member_api_docs
 ''';
 
+const _helperHeader = '''
+// GENERATED CODE - DO NOT MODIFY BY HAND.
+// ignore_for_file: public_member_api_docs
+''';
+
+const _serviceHelpersContent = '''
+$_helperHeader
+
+T decodeJsonObject<T>(
+  dynamic json,
+  T Function(Map<String, dynamic>) factory,
+) {
+  if (json == null) {
+    throw ArgumentError('Expected a JSON object but received null.');
+  }
+  if (json is! Map) {
+    throw ArgumentError('Expected a JSON object but received \${json.runtimeType}.');
+  }
+  return factory(Map<String, dynamic>.from(json as Map));
+}
+
+List<T> decodeJsonList<T>(
+  dynamic json,
+  T Function(Map<String, dynamic>) factory,
+) {
+  if (json is! List) {
+    return const [];
+  }
+  return json
+      .whereType<Map>()
+      .map((value) => factory(Map<String, dynamic>.from(value as Map)))
+      .toList();
+}
+''';
+
 class ServiceGenerationResult {
   ServiceGenerationResult({required this.files, required this.warnings});
 
@@ -25,12 +61,14 @@ class ServiceGenerator {
   ServiceGenerator({
     required this.outputDirectory,
     required this.apiServicePath,
+    required this.helpersImportPath,
     required this.symbolToFile,
     required this.resolver,
   }) : _jsonBuilder = JsonExpressionBuilder(resolver);
 
   final String outputDirectory;
   final String apiServicePath;
+  final String helpersImportPath;
   final Map<String, String> symbolToFile;
   final TypeResolver resolver;
 
@@ -40,6 +78,9 @@ class ServiceGenerator {
     final files = <GeneratedFile>[];
     final warnings = <String>[];
 
+    files.add(_buildHelpersFile());
+    final servicePaths = <String>[];
+
     for (final client in clients) {
       final result = _buildServiceFile(client, warnings);
       if (result == null) {
@@ -48,7 +89,12 @@ class ServiceGenerator {
         );
         continue;
       }
+      servicePaths.add(result.path);
       files.add(result);
+    }
+
+    if (servicePaths.isNotEmpty) {
+      files.add(_buildServicesBarrel(servicePaths));
     }
 
     return ServiceGenerationResult(files: files, warnings: warnings);
@@ -64,6 +110,11 @@ class ServiceGenerator {
       '${toSnakeCase(serviceName)}.dart',
     );
     final imports = <String>{};
+    imports.add(
+      p
+          .relative(helpersImportPath, from: p.dirname(filePath))
+          .replaceAll('\\', '/'),
+    );
     final methodsBuffer = StringBuffer();
     final methodNames = <String>{};
 
@@ -147,6 +198,15 @@ class ServiceGenerator {
             .whereType<_MethodParameter>()
             .toList();
 
+    final queryParameters =
+        request.parameters
+            .where((param) => param.parameterType == HttpParameterType.query)
+            .map(
+              (param) => _QueryParameter.fromRequestParameter(param, resolver),
+            )
+            .whereType<_QueryParameter>()
+            .toList();
+
     final bodyParameter = _findBodyParameter(request.parameters);
 
     final buffer = StringBuffer();
@@ -183,27 +243,14 @@ class ServiceGenerator {
         imports.add(importPath);
       }
     }
-
-    final docLines = <String>[
-      '${request.requestType.name.toUpperCase()} ${request.route}',
-      ..._splitDescription(request.description),
-      ...request.parameters
-          .where((param) => param.description?.trim().isNotEmpty ?? false)
-          .map(
-            (param) =>
-                '[${param.name ?? param.parameterType.name}] - ${param.description!.trim()}',
-          ),
-    ].where((line) => line.isNotEmpty).toList();
-    final docLinesOrdered = <String>[];
-    final seenDocLines = <String>{};
-    for (final line in docLines) {
-      if (seenDocLines.add(line)) {
-        docLinesOrdered.add(line);
+    for (final param in queryParameters) {
+      final importPath = _typeImportPath(param.type.type, filePath);
+      if (importPath != null) {
+        imports.add(importPath);
       }
     }
-    for (final line in docLinesOrdered) {
-      buffer.writeln('  /// $line');
-    }
+
+    _writeDocumentation(buffer, request, bodyParameter, queryParameters);
 
     final positionalParams =
         pathParameters.isEmpty
@@ -221,18 +268,27 @@ class ServiceGenerator {
               _jsonBuilder,
             );
 
-    final namedParams = <String>['Map<String, String>? queryParams'];
+    final namedParams = <_ParameterSpec>[];
     if (bodyParamSpec != null) {
-      final requiredKeyword = bodyParamSpec.isRequired ? 'required ' : '';
-      namedParams.add(
-        '$requiredKeyword${bodyParamSpec.type} ${bodyParamSpec.name}',
-      );
+      namedParams.add(_ParameterSpec.body(bodyParamSpec));
     }
+    for (final param in queryParameters) {
+      namedParams.add(_ParameterSpec.query(param));
+    }
+    namedParams.add(
+      _ParameterSpec(
+        name: 'additionalQueryParams',
+        type: 'Map<String, String>?',
+        kind: _ParameterKind.extraQuery,
+      ),
+    );
 
     final positionalSection =
         positionalParams.isEmpty ? '' : '$positionalParams';
     final namedSection =
-        namedParams.isEmpty ? '' : '{${namedParams.join(', ')}}';
+        namedParams.isEmpty
+            ? ''
+            : '{${namedParams.map((p) => p.signature).join(', ')}}';
     final comma =
         positionalSection.isNotEmpty && namedSection.isNotEmpty ? ', ' : '';
 
@@ -244,6 +300,35 @@ class ServiceGenerator {
     final endpoint = _interpolateRoute(request.route, pathParameters);
     buffer.writeln("    final endpoint = '$endpoint';");
 
+    if (queryParameters.isNotEmpty) {
+      buffer.writeln('    final query = <String, String>{};');
+      for (final param in queryParameters) {
+        if (param.isRequired) {
+          buffer.writeln(
+            "    query['${param.originalName}'] = ${param.encode(resolver, param.dartName)};",
+          );
+        } else {
+          final tempName = '_${param.dartName}';
+          buffer.writeln('    final $tempName = ${param.dartName};');
+          buffer.writeln('    if ($tempName != null) {');
+          buffer.writeln(
+            "      query['${param.originalName}'] = ${param.encode(resolver, tempName)};",
+          );
+          buffer.writeln('    }');
+        }
+      }
+      buffer.writeln(
+        '    if (additionalQueryParams != null && additionalQueryParams.isNotEmpty) {',
+      );
+      buffer.writeln('      query.addAll(additionalQueryParams);');
+      buffer.writeln('    }');
+      buffer.writeln(
+        '    final resolvedQueryParams = query.isEmpty ? null : query;',
+      );
+    } else {
+      buffer.writeln('    final resolvedQueryParams = additionalQueryParams;');
+    }
+
     buffer
       ..writeln('    return _api.$httpMethod(')
       ..writeln('      endpoint,');
@@ -251,7 +336,7 @@ class ServiceGenerator {
       buffer.writeln('      body: ${bodyParamSpec.invocationArgument},');
     }
     buffer
-      ..writeln('      queryParams: queryParams,')
+      ..writeln('      queryParams: resolvedQueryParams,')
       ..writeln('      fromJson: ${responseSpec.fromJson},')
       ..writeln('    );');
     buffer.writeln('  }');
@@ -276,6 +361,53 @@ class ServiceGenerator {
 
   bool _methodSupportsBody(String methodName) =>
       methodName == 'post' || methodName == 'put' || methodName == 'patch';
+
+  void _writeDocumentation(
+    StringBuffer buffer,
+    UniversalRequest request,
+    UniversalRequestType? bodyParameter,
+    List<_QueryParameter> queryParameters,
+  ) {
+    final seen = <String>{};
+
+    bool writeLine(String line) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) {
+        return false;
+      }
+      buffer.writeln('  /// $trimmed');
+      return true;
+    }
+
+    writeLine('${request.requestType.name.toUpperCase()} ${request.route}');
+    final description = request.description?.trim();
+    if (description != null && description.isNotEmpty) {
+      for (final line in _splitDescription(description)) {
+        writeLine(line);
+      }
+    }
+
+    final allParams =
+        [
+          if (bodyParameter != null) bodyParameter,
+          ...request.parameters,
+        ].whereType<UniversalRequestType>();
+
+    for (final param in allParams) {
+      final desc = param.description?.trim();
+      if (desc == null || desc.isEmpty) {
+        continue;
+      }
+      final name = param.name ?? param.parameterType.name;
+      writeLine('[$name] - $desc');
+    }
+
+    if (queryParameters.isNotEmpty) {
+      writeLine(
+        'Pass `additionalQueryParams` to include extra query values not defined in the OpenAPI spec.',
+      );
+    }
+  }
 
   String _interpolateRoute(
     String route,
@@ -363,7 +495,62 @@ class ServiceGenerator {
       }
     }
   }
+
+  GeneratedFile _buildHelpersFile() =>
+      GeneratedFile(path: helpersImportPath, content: _serviceHelpersContent);
+
+  GeneratedFile _buildServicesBarrel(List<String> servicePaths) {
+    final buffer =
+        StringBuffer()
+          ..writeln(_generatedHeader)
+          ..writeln("export 'service_helpers.dart';");
+    final exports =
+        servicePaths
+            .map(
+              (path) =>
+                  p.relative(path, from: outputDirectory).replaceAll('\\', '/'),
+            )
+            .toList()
+          ..sort();
+    for (final exportPath in exports) {
+      buffer.writeln("export '$exportPath';");
+    }
+    return GeneratedFile(
+      path: p.join(outputDirectory, 'services.dart'),
+      content: buffer.toString(),
+    );
+  }
 }
+
+class _ParameterSpec {
+  _ParameterSpec({
+    required this.name,
+    required this.type,
+    required this.kind,
+    this.isRequired = false,
+  });
+
+  _ParameterSpec.body(_BodyParameterSpec spec)
+    : name = spec.name,
+      type = spec.type,
+      kind = _ParameterKind.body,
+      isRequired = spec.isRequired;
+
+  _ParameterSpec.query(_QueryParameter spec)
+    : name = spec.dartName,
+      type = spec.dartType,
+      kind = _ParameterKind.query,
+      isRequired = spec.isRequired;
+
+  final String name;
+  final String type;
+  final _ParameterKind kind;
+  final bool isRequired;
+
+  String get signature => '${isRequired ? 'required ' : ''}$type $name';
+}
+
+enum _ParameterKind { body, query, extraQuery }
 
 class _ServiceMethodResult {
   const _ServiceMethodResult({required this.code, required this.imports});
@@ -390,12 +577,67 @@ class _MethodParameter {
     if (param.name == null) {
       return null;
     }
-    final dartName = toCamelCase(param.name!);
+    final dartName = sanitizeIdentifier(toCamelCase(param.name!));
     final dartType = resolver.dartType(param.type);
     return _MethodParameter(
       originalName: param.name!,
       dartName: dartName,
       type: dartType,
+    );
+  }
+}
+
+class _QueryParameter {
+  const _QueryParameter({
+    required this.originalName,
+    required this.dartName,
+    required this.dartType,
+    required this.type,
+    required this.isRequired,
+    this.description,
+  });
+
+  final String originalName;
+  final String dartName;
+  final String dartType;
+  final UniversalType type;
+  final bool isRequired;
+  final String? description;
+
+  String encode(
+    TypeResolver resolver,
+    String reference, {
+    bool forceNonNullable = false,
+  }) {
+    return resolver.queryParameterEncodeExpression(
+      type,
+      reference,
+      forceNonNullable: forceNonNullable,
+    );
+  }
+
+  static _QueryParameter? fromRequestParameter(
+    UniversalRequestType param,
+    TypeResolver resolver,
+  ) {
+    final name = param.name;
+    if (name == null) {
+      return null;
+    }
+    final dartName = sanitizeIdentifier(toCamelCase(name));
+    final dartType = resolver.dartType(param.type);
+    final isRequired =
+        param.type.isRequired && !resolver.isNullable(param.type);
+    return _QueryParameter(
+      originalName: name,
+      dartName: dartName,
+      dartType: dartType,
+      type: param.type,
+      isRequired: isRequired,
+      description:
+          param.description?.trim().isEmpty ?? true
+              ? null
+              : param.description!.trim(),
     );
   }
 }
@@ -422,7 +664,7 @@ class _BodyParameterSpec {
     JsonExpressionBuilder builder,
   ) {
     final name = requestType.name ?? 'body';
-    final parameterName = toCamelCase(name);
+    final parameterName = sanitizeIdentifier(toCamelCase(name));
     final dartType = resolver.dartType(requestType.type);
     final encodedValue = builder.encodeValue(requestType.type, parameterName);
     return _BodyParameterSpec(
@@ -459,21 +701,48 @@ class _ResponseSpec {
     }
 
     final displayType = resolver.dartType(type);
-    final expression = builder.decode(
-      type,
-      'json',
-      defaultCollections: type.wrappingCollections.isNotEmpty,
-    );
-
     final imports = <String>{};
-    if (resolver.isCustomModel(type.type) || resolver.isEnum(type.type)) {
+    final isListResponse =
+        type.wrappingCollections.isNotEmpty &&
+        _isListWrapper(type.wrappingCollections.first);
+
+    String fromJsonExpression;
+    if (isListResponse && resolver.isCustomModel(type.type)) {
       imports.add(type.type);
+      fromJsonExpression =
+          '(json) => decodeJsonList(json, ${type.type}.fromJson)';
+    } else if (resolver.isCustomModel(type.type)) {
+      imports.add(type.type);
+      fromJsonExpression =
+          '(json) => decodeJsonObject(json, ${type.type}.fromJson)';
+    } else {
+      final expression = builder.decode(
+        type,
+        'json',
+        defaultCollections: type.wrappingCollections.isNotEmpty,
+      );
+      if (resolver.isCustomModel(type.type) || resolver.isEnum(type.type)) {
+        imports.add(type.type);
+      }
+      fromJsonExpression = '(json) => $expression';
     }
 
     return _ResponseSpec(
       displayType: displayType,
-      fromJson: '(json) => $expression',
+      fromJson: fromJsonExpression,
       imports: imports,
     );
+  }
+}
+
+bool _isListWrapper(UniversalCollections wrapper) {
+  switch (wrapper) {
+    case UniversalCollections.list:
+    case UniversalCollections.listNullableItem:
+    case UniversalCollections.nullableList:
+    case UniversalCollections.nullableListNullableItem:
+      return true;
+    default:
+      return false;
   }
 }
